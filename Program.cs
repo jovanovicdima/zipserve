@@ -1,7 +1,9 @@
-﻿using System;
-using System.Net;
-using System.Threading.Tasks;
+﻿using System.Net;
+using System.Runtime.Caching;
 using ICSharpCode.SharpZipLib.Zip;
+
+// Initialize cache
+MemoryCache cache = MemoryCache.Default;
 
 // Create a new HttpListener instance
 HttpListener listener = new HttpListener();
@@ -12,7 +14,6 @@ listener.Prefixes.Add("http://*:8080/");
 
 // Start the listener
 listener.Start();
-
 printNote("Listening on port 8080...");
 
 // Handle incoming requests
@@ -24,8 +25,7 @@ Task server = Task.Factory.StartNew(() =>
         {
             // Wait for an incoming request
             HttpListenerContext context = listener.GetContext();
-            string? arguments = context.Request.RawUrl ?? "";
-
+            string arguments = context.Request.RawUrl ?? "";
 
             // Check if there are arguments
             if(arguments == "" || arguments == "/") {
@@ -37,8 +37,19 @@ Task server = Task.Factory.StartNew(() =>
             // Do not process favicon request
             if(arguments == "/favicon.ico") continue;
 
+            byte[] cachedZip = (byte[])cache.Get(arguments);
+            if(cachedZip != null) {
+                downloadZip(cachedZip, context);
+                printNote("Request is already cached.");
+                continue;
+            }
+            else
+            {
+                printWarning("Request not cached.");
+            }
+
             string[] requestedFiles = arguments.Substring(1).Split("&");
-            
+
             List<string> paths = new List<string>();
 
             // Find what files are present
@@ -84,7 +95,7 @@ Task server = Task.Factory.StartNew(() =>
             }
 
             // Combine all files and zip them
-            Task test = Task.Factory.StartNew(() => returnZip(tasks, context));
+            Task test = Task.Factory.StartNew(() => zip(tasks, context, arguments));
         }
         catch (Exception ex)
         {
@@ -109,7 +120,7 @@ void returnText(string text, HttpListenerContext context) {
     context.Response.Close();
 }
 
-void returnZip(List<Task<(byte[], string)>> tasks, HttpListenerContext context) {
+void zip(List<Task<(byte[], string)>> tasks, HttpListenerContext context, string request) {
     using(var zip = new MemoryStream()) 
     {
         using (var zipStream = new ZipOutputStream(zip))
@@ -121,15 +132,30 @@ void returnZip(List<Task<(byte[], string)>> tasks, HttpListenerContext context) 
                 zipStream.CloseEntry();
             }
             zipStream.Finish();
+            byte[] zippedFile = zip.ToArray();
             printNote("Files zipped.");
 
-            context.Response.ContentType = "appliaction/zip";
-            context.Response.ContentLength64 = zip.Length;
-            context.Response.Headers.Add("Content-Disposition", "attachment; filename=\"archive.zip\"");
-            context.Response.OutputStream.Write(zip.ToArray(), 0, (int)zip.Length);
-            context.Response.Close();
+            // Add zipped file to cache
+            CacheItemPolicy policy = new CacheItemPolicy
+            {
+                AbsoluteExpiration = DateTimeOffset.Now.AddMinutes(1)
+            };
+            cache.Add(request, zippedFile, policy);
+            printNote("Zipped file cached.");
+
+            downloadZip(zippedFile, context);
         }
     }
+}
+
+void downloadZip(byte[] zip, HttpListenerContext context)
+{
+    printNote("Downloading zip...");
+    context.Response.ContentType = "appliaction/zip";
+    context.Response.ContentLength64 = zip.Length;
+    context.Response.Headers.Add("Content-Disposition", "attachment; filename=\"archive.zip\"");
+    context.Response.OutputStream.Write(zip, 0, zip.Length);
+    context.Response.Close();
 }
 
 void printWarning(string text) 
