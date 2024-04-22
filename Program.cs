@@ -13,7 +13,7 @@ listener.Prefixes.Add("http://*:8080/");
 // Start the listener
 listener.Start();
 
-Console.WriteLine("Listening on port 8080...");
+printNote("Listening on port 8080...");
 
 // Handle incoming requests
 Task server = Task.Factory.StartNew(() =>
@@ -26,11 +26,16 @@ Task server = Task.Factory.StartNew(() =>
             HttpListenerContext context = listener.GetContext();
             string? arguments = context.Request.RawUrl ?? "";
 
+
             // Check if there are arguments
             if(arguments == "" || arguments == "/") {
                 returnText("No Files Requested", context);
+                printWarning("No Files Requested.");
                 continue;
             }
+
+            // Do not process favicon request
+            if(arguments == "/favicon.ico") continue;
 
             string[] requestedFiles = arguments.Substring(1).Split("&");
             
@@ -38,53 +43,60 @@ Task server = Task.Factory.StartNew(() =>
 
             // Find what files are present
             foreach(var item in requestedFiles)
-            {
+            {   
+                
+                printNote($"File {item} requested.");
                 string path = Path.Combine(FilePath, item);
                 if(File.Exists(path))
                 {
                     paths.Add(path);
-                    Console.WriteLine($"{item} exists.");
+                    printNote($"File {item} found.");
+                }
+                else
+                {
+                    printWarning($"File {item} not found.");
                 }
             }
 
             if(paths.Count == 0) 
             {
                 returnText("No Files Found!", context);
+                printWarning("No Files Found.");
                 continue;
             }
 
-            using(var zip = new MemoryStream()) 
-            { 
-                List<Task<(byte[], string)>> tasks = new();
-                
-                // Read all files in parallel
-                foreach(string path in paths) 
+            List<Task<(byte[], string)>> tasks = new();
+            
+            // Read all files in parallel
+            foreach(string path in paths) 
+            {
+                Task<(byte[], string)> task = Task.Factory.StartNew(() => 
                 {
-                    Task<(byte[], string)> task = Task.Factory.StartNew((path) => 
-                    {
-                        return (File.ReadAllBytes((string)path!), (string)path!);
-                    }, path);
-                    tasks.Add(task);
-                }
-                foreach(var task in tasks) 
-                {
-                    task.Wait();
-                }
+                    byte[] file = File.ReadAllBytes(path);
+                    printNote($"File {Path.GetFileName(path)} read");
+                    return (file, path);
+                });
+                tasks.Add(task);
+            }
+            foreach(var task in tasks) 
+            {
+                task.Wait();
+            }
 
-                // Combine all files and zip them
-                Task test = Task.Factory.StartNew(() => returnZip(tasks, context));
-            }   
+            // Combine all files and zip them
+            Task test = Task.Factory.StartNew(() => returnZip(tasks, context));
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Error: " + ex.Message);
+            printError(ex.Message);
         }
     }
 });
 
 // Wait for the user to press a key before quitting
-Console.WriteLine("Press any key to stop the server...");
+printNote("Press any key to stop the server...");
 Console.ReadKey();
+printNote("Key pressed. Stopping server...");
 
 // Stop the listener
 listener.Stop();
@@ -109,6 +121,7 @@ void returnZip(List<Task<(byte[], string)>> tasks, HttpListenerContext context) 
                 zipStream.CloseEntry();
             }
             zipStream.Finish();
+            printNote("Files zipped.");
 
             context.Response.ContentType = "appliaction/zip";
             context.Response.ContentLength64 = zip.Length;
@@ -117,4 +130,28 @@ void returnZip(List<Task<(byte[], string)>> tasks, HttpListenerContext context) 
             context.Response.Close();
         }
     }
+}
+
+void printWarning(string text) 
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.Write("WARN: ");
+    Console.ResetColor();
+    Console.WriteLine(text);
+}
+
+void printNote(string text) 
+{
+    Console.ForegroundColor = ConsoleColor.Blue;
+    Console.Write("NOTE: ");
+    Console.ResetColor();
+    Console.WriteLine(text);
+}
+
+void printError(string text) 
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Write("ERROR: ");
+    Console.ResetColor();
+    Console.WriteLine(text);
 }
