@@ -1,0 +1,8 @@
+Create a web server that generates a zip archive for requested files and returns it to the client.
+All requests to the server are sent via a browser using the GET method.
+In the request, the names of the files to be archived are specified as parameters.
+If any of the specified files do not exist on the server, the other files are archived.
+If none of the requested files exist on the server, a message is displayed to the client.
+Use the SharpZipLib library to create the zip archive (this library can be installed using the NuGet package manager).
+
+Example server call: http://localhost:8080/test1.txt&test2.txt&test3.txt
