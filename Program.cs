@@ -17,7 +17,7 @@ listener.Start();
 printNote("Listening on port 8080...");
 
 // Handle incoming requests
-Task server = Task.Factory.StartNew(() =>
+Thread server = new Thread(() =>
 {
     while (listener.IsListening)
     {
@@ -25,7 +25,8 @@ Task server = Task.Factory.StartNew(() =>
         {
             // Wait for an incoming request
             HttpListenerContext context = listener.GetContext();
-            Task.Factory.StartNew(() => handleRequest(context));
+            Thread request = new Thread(() => handleRequest(context));
+            request.Start();
         }
         catch (Exception ex)
         {
@@ -34,6 +35,7 @@ Task server = Task.Factory.StartNew(() =>
     }
 });
 
+server.Start();
 // Wait for the user to press a key before quitting
 printNote("Press any key to stop the server...");
 Console.ReadKey();
@@ -94,26 +96,28 @@ void handleRequest(HttpListenerContext context) {
         return;
     }
 
-    List<Task<(byte[], string)>> tasks = new();
+    List<Thread> threads = new();
+    List<(byte[], string)> results = new();
     
     // Read all files in parallel
     foreach(string path in paths) 
     {
-        Task<(byte[], string)> task = Task.Factory.StartNew(() => 
-        {
+        Thread readFile = new Thread(() => {
             byte[] file = File.ReadAllBytes(path);
-            printNote($"File {Path.GetFileName(path)} read");
-            return (file, path);
+            printNote($"File {Path.GetFileName(path)} read.");
+            results.Add((file, path));
         });
-        tasks.Add(task);
+        readFile.Start();
+        threads.Add(readFile);
     }
-    foreach(var task in tasks) 
+    foreach(var thread in threads) 
     {
-        task.Wait();
+        thread.Join();
     }
 
     // Combine all files and zip them
-    Task test = Task.Factory.StartNew(() => zip(tasks, context, arguments));   
+    Thread zipFiles = new Thread(() => zip(results, context, arguments));  
+    zipFiles.Start(); 
 }
 
 void returnText(string text, HttpListenerContext context) {
@@ -124,15 +128,15 @@ void returnText(string text, HttpListenerContext context) {
     context.Response.Close();
 }
 
-void zip(List<Task<(byte[], string)>> tasks, HttpListenerContext context, string request) {
+void zip(List<(byte[], string)> results, HttpListenerContext context, string request) {
     using(var zip = new MemoryStream()) 
     {
         using (var zipStream = new ZipOutputStream(zip))
         {
             zipStream.SetLevel(5);
-            foreach(var task in tasks) {
-                zipStream.PutNextEntry(new ZipEntry(Path.GetFileName(task.Result.Item2)));
-                zipStream.Write(task.Result.Item1, 0, task.Result.Item1.Length);
+            foreach(var result in results) {
+                zipStream.PutNextEntry(new ZipEntry(Path.GetFileName(result.Item2)));
+                zipStream.Write(result.Item1, 0, result.Item1.Length);
                 zipStream.CloseEntry();
             }
             zipStream.Finish();
