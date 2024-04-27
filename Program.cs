@@ -25,77 +25,7 @@ Task server = Task.Factory.StartNew(() =>
         {
             // Wait for an incoming request
             HttpListenerContext context = listener.GetContext();
-            string arguments = context.Request.RawUrl ?? "";
-
-            // Check if there are arguments
-            if(arguments == "" || arguments == "/") {
-                returnText("No Files Requested", context);
-                printWarning("No Files Requested.");
-                continue;
-            }
-
-            // Do not process favicon request
-            if(arguments == "/favicon.ico") continue;
-
-            byte[] cachedZip = (byte[])cache.Get(arguments);
-            if(cachedZip != null) {
-                downloadZip(cachedZip, context);
-                printNote("Request is already cached.");
-                continue;
-            }
-            else
-            {
-                printWarning("Request not cached.");
-            }
-
-            string[] requestedFiles = arguments.Substring(1).Split("&");
-
-            List<string> paths = new List<string>();
-
-            // Find what files are present
-            foreach(var item in requestedFiles)
-            {   
-                
-                printNote($"File {item} requested.");
-                string path = Path.Combine(FilePath, item);
-                if(File.Exists(path))
-                {
-                    paths.Add(path);
-                    printNote($"File {item} found.");
-                }
-                else
-                {
-                    printWarning($"File {item} not found.");
-                }
-            }
-
-            if(paths.Count == 0) 
-            {
-                returnText("No Files Found!", context);
-                printWarning("No Files Found.");
-                continue;
-            }
-
-            List<Task<(byte[], string)>> tasks = new();
-            
-            // Read all files in parallel
-            foreach(string path in paths) 
-            {
-                Task<(byte[], string)> task = Task.Factory.StartNew(() => 
-                {
-                    byte[] file = File.ReadAllBytes(path);
-                    printNote($"File {Path.GetFileName(path)} read");
-                    return (file, path);
-                });
-                tasks.Add(task);
-            }
-            foreach(var task in tasks) 
-            {
-                task.Wait();
-            }
-
-            // Combine all files and zip them
-            Task test = Task.Factory.StartNew(() => zip(tasks, context, arguments));
+            Task.Factory.StartNew(() => handleRequest(context));
         }
         catch (Exception ex)
         {
@@ -111,6 +41,80 @@ printNote("Key pressed. Stopping server...");
 
 // Stop the listener
 listener.Stop();
+
+void handleRequest(HttpListenerContext context) {
+    string arguments = context.Request.RawUrl ?? "";
+
+    // Check if there are arguments
+    if(arguments == "" || arguments == "/") {
+        returnText("No Files Requested", context);
+        printWarning("No Files Requested.");
+        return;
+    }
+
+    // Do not process favicon request
+    if(arguments == "/favicon.ico") return;
+
+    byte[] cachedZip = (byte[])cache.Get(arguments);
+    if(cachedZip != null) {
+        downloadZip(cachedZip, context);
+        printNote("Request is already cached.");
+        return;
+    }
+    else
+    {
+        printWarning("Request not cached.");
+    }
+
+    string[] requestedFiles = arguments.Substring(1).Split("&");
+
+    List<string> paths = new List<string>();
+
+    // Find what files are present
+    foreach(var item in requestedFiles)
+    {   
+        
+        printNote($"File {item} requested.");
+        string path = Path.Combine(FilePath, item);
+        if(File.Exists(path))
+        {
+            paths.Add(path);
+            printNote($"File {item} found.");
+        }
+        else
+        {
+            printWarning($"File {item} not found.");
+        }
+    }
+
+    if(paths.Count == 0) 
+    {
+        returnText("No Files Found!", context);
+        printWarning("No Files Found.");
+        return;
+    }
+
+    List<Task<(byte[], string)>> tasks = new();
+    
+    // Read all files in parallel
+    foreach(string path in paths) 
+    {
+        Task<(byte[], string)> task = Task.Factory.StartNew(() => 
+        {
+            byte[] file = File.ReadAllBytes(path);
+            printNote($"File {Path.GetFileName(path)} read");
+            return (file, path);
+        });
+        tasks.Add(task);
+    }
+    foreach(var task in tasks) 
+    {
+        task.Wait();
+    }
+
+    // Combine all files and zip them
+    Task test = Task.Factory.StartNew(() => zip(tasks, context, arguments));   
+}
 
 void returnText(string text, HttpListenerContext context) {
     string responseString = $"<html><body>{text}</body></html>";
